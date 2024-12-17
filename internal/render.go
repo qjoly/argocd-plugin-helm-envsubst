@@ -66,6 +66,12 @@ func (renderer *Renderer) RenderTemplate(helmChartPath string, debugLogFilePath 
 
 	helmConfig := renderer.mergeYaml(configFileNames)
 	argocdConfig := ReadArgocdConfig(helmConfig)
+	fmt.Println("-----------------")
+	fmt.Println("Argocd Config")
+	fmt.Println(argocdConfig)
+	fmt.Println(helmConfig)
+	fmt.Println(argocdConfig.ReleaseName)
+	fmt.Println("-----------------")
 
 	if len(argocdConfig.Namespace) > 0 {
 		args = append(args, "--namespace")
