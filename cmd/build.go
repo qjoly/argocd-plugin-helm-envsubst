@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	app "github.com/qjoly/argocd-plugin-helm-envsubst/internal"
 	"github.com/spf13/cobra"
-	app "gitlab.int.hextech.io/technology/utils/cicd/argocd-helm-envsubst-plugin/internal"
 )
 
 var (

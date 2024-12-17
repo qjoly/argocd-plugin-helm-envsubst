@@ -27,10 +27,10 @@ type HelmRepositoryConfig struct {
 type Repository struct {
 	CaFile                string `default:"" yaml:"caFile"`
 	CertFile              string `default:"" yaml:"certFile"`
-	InsecureSkipTlsVerify bool   `default:false yaml:"insecure_skip_tls_verify"`
+	InsecureSkipTlsVerify bool   `default:"false" yaml:"insecure_skip_tls_verify"`
 	KeyFile               string `default:"" yaml:"keyFile"`
 	Name                  string `default:"" yaml:"name"`
-	PassCredentialsAll    bool   `default:false yaml:"pass_credentials_all"`
+	PassCredentialsAll    bool   `default:"false" yaml:"pass_credentials_all"`
 	Username              string `default:"" yaml:"username"`
 	Password              string `default:"" yaml:"password"`
 	Url                   string `default:"" yaml:"url"`

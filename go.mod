@@ -1,4 +1,4 @@
-module gitlab.int.hextech.io/technology/utils/cicd/argocd-helm-envsubst-plugin
+module github.com/qjoly/argocd-plugin-helm-envsubst
 
 go 1.18
 

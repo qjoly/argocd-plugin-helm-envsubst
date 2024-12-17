@@ -9,7 +9,7 @@ build-run-sh:
 # GOOS=linux, GOARCH=amd64 works for both minikube and eks
 build-push:
 	docker buildx create --use
-	docker buildx build --platform linux/arm64,linux/amd64 --push --build-arg GOOS=linux --build-arg GOARCH=amd64 -t registry.gitlab.int.hextech.io/technology/utils/cicd/argocd-helm-envsubst-plugin:$(GIT_HASH) .
+	docker buildx build --platform linux/arm64,linux/amd64 --push --build-arg GOOS=linux --build-arg GOARCH=amd64 -t registry.github.com/qjoly/argocd-plugin-helm-envsubst:$(GIT_HASH) .
 	docker buildx rm
 
 build:

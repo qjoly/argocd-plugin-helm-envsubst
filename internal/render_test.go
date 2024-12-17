@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"gitlab.int.hextech.io/technology/utils/cicd/argocd-helm-envsubst-plugin/internal"
+	"github.com/qjoly/argocd-plugin-helm-envsubst/internal"
 )
 
 const (
