@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cmp-plugin
+  namespace: argocd
+data:
+  argocd-helm-envsubst-plugin.yaml: |
+    apiVersion: argoproj.io/v1alpha1
+    kind: ConfigManagementPlugin
+    metadata:
+      name: cmp-plugin
+    spec:
+      version: v0.0.1
+      init:
+        command: ["sh", "-c"]
+        args: ["argocd-helm-envsubst-plugin build --helm-registry-secret-config-path /helm-working-dir/plugin-repositories/repositories.yaml"]
+      generate:
+        command: ["sh", "-c"]
+        args: ["argocd-helm-envsubst-plugin render --log-location /tmp/argocd-helm-envsubst-plugin/"]
+      discover:
+        find:
+          command: ["echo", "hi"]

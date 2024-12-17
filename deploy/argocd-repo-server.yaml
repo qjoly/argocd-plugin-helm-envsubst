@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+  namespace: argocd
+spec:
+  template:
+    spec:
+      # Mount SA token for Kubernets auth
+      # Note: In 2.4.0 onward, there is a dedicated SA for repo-server (not default)
+      # Note: This is not fully supported for Kubernetes < v1.19
+      automountServiceAccountToken: true
+
+      # Each of the embedded YAMLs inside cmp-plugin ConfigMap will be mounted into it's respective plugin sidecar
+      volumes:
+        - configMap:
+            name: cmp-plugin
+          name: cmp-plugin
+        - name: custom-tools
+          emptyDir: {}
+
+      initContainers:
+      - name: download-tools
+        image: ghcr.io/qjoly/argocd-plugin-helm-envsubst:0.0.1
+        command: [sh, -c]
+        args:
+          - >-
+            mv /app/argocd-helm-envsubst-plugin /custom-tools/
+
+        volumeMounts:
+          - mountPath: /custom-tools
+            name: custom-tools
+
+      # argocd-helm-envsubst-plugin with Helm
+      containers:
+      - name: argocd-helm-envsubst-plugin
+        command: [/var/run/argocd/argocd-cmp-server]
+        image: quay.io/argoproj/argocd:v2.13.2
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 999
+        volumeMounts:
+          - mountPath: /var/run/argocd
+            name: var-files
+          - mountPath: /home/argocd/cmp-server/plugins
+            name: plugins
+          - mountPath: /tmp
+            name: tmp
+
+          # Register plugins into sidecar
+          - mountPath: /home/argocd/cmp-server/config/plugin.yaml
+            subPath: argocd-helm-envsubst-plugin.yaml
+            name: cmp-plugin
+
+          # Important: Mount tools into $PATH
+          - name: custom-tools
+            subPath: argocd-helm-envsubst-plugin
+            mountPath: /usr/local/bin/argocd-helm-envsubst-plugin
