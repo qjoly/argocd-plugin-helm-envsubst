@@ -29,7 +29,7 @@ const (
 
 var (
 	defaultDebugLogFilePath = "/tmp/argocd-helm-envsubst-plugin/"
-	defaultHelmChartPath    = "./test/"
+	defaultHelmChartPath    = "."
 	argocdEnvVarPrefix      = "ARGOCD_ENV"
 )
 
