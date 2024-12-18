@@ -59,7 +59,11 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 	if err != nil {
 		log.Fatalf("Error reading directory: %v", err)
 	}
-	log.Println("Files in directory:")
+	dir, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Error getting current directory: %v", err)
+	}
+	log.Printf("Files in directory %s:", dir)
 	for _, file := range files {
 		log.Println(file.Name())
 	}
