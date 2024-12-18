@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"io/ioutil"
 	"log"
 	"os"
 
@@ -22,7 +21,7 @@ type HexArgocdPluginConfig struct {
 
 func ReadChartYaml() map[string]interface{} {
 	var chartYaml map[string]interface{}
-	bs, err := ioutil.ReadFile("Chart.yaml")
+	bs, err := os.ReadFile("Chart.yaml")
 	if err != nil {
 		log.Fatalf("Read Chart.yaml error: %v", err)
 	}
@@ -33,7 +32,7 @@ func ReadChartYaml() map[string]interface{} {
 }
 
 func useExternalHelmChartPathIfSet() {
-	bs, err := ioutil.ReadFile("values.yaml")
+	bs, err := os.ReadFile("values.yaml")
 	if err != nil {
 		log.Fatalf("useExternalHelmChart - read values.yaml error : %v", err)
 	}

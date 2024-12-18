@@ -37,18 +37,29 @@ func NewRenderer() *Renderer {
 }
 
 func (renderer *Renderer) RenderTemplate(helmChartPath string, debugLogFilePath string) {
+	fmt.Println("Starting RenderTemplate")
+
 	if len(debugLogFilePath) <= 0 {
 		renderer.debugLogFilePath = defaultDebugLogFilePath
 	} else {
 		renderer.debugLogFilePath = debugLogFilePath
 	}
+	fmt.Printf("Debug log file path set to: %s\n", renderer.debugLogFilePath)
 
 	if len(helmChartPath) <= 0 {
 		helmChartPath = defaultHelmChartPath
 	}
+	fmt.Printf("Helm chart path set to: %s\n", helmChartPath)
 
-	os.Chdir(helmChartPath)
+	err := os.Chdir(helmChartPath)
+	if err != nil {
+		fmt.Printf("Error changing directory: %v\n", err)
+		log.Fatalf("Error changing directory: %v", err)
+	}
+	fmt.Printf("Changed directory to: %s\n", helmChartPath)
+
 	envs := renderer.getArgocdEnvList()
+	fmt.Printf("ArgoCD environment variables: %v\n", envs)
 
 	command := "helm"
 	args := []string{"template"}
@@ -56,58 +67,65 @@ func (renderer *Renderer) RenderTemplate(helmChartPath string, debugLogFilePath 
 	useExternalHelmChartPathIfSet()
 
 	configFileNames := renderer.FindHelmConfigs()
+	fmt.Printf("Found Helm config files: %v\n", configFileNames)
+
 	if len(configFileNames) > 0 {
 		for _, name := range configFileNames {
 			args = append(args, "-f")
 			args = append(args, name)
 			renderer.inlineEnvsubst(name, envs)
+			fmt.Printf("Processed config file: %s\n", name)
 		}
 	}
 
 	helmConfig := renderer.mergeYaml(configFileNames)
+	fmt.Printf("Merged Helm config: %s\n", helmConfig)
+
 	argocdConfig := ReadArgocdConfig(helmConfig)
-	fmt.Println("-----------------")
-	fmt.Println("Argocd Config")
-	fmt.Println(argocdConfig)
-	fmt.Println(helmConfig)
-	fmt.Println(argocdConfig.ReleaseName)
-	fmt.Println("-----------------")
+	fmt.Printf("ArgoCD config: %v\n", argocdConfig)
 
 	if len(argocdConfig.Namespace) > 0 {
 		args = append(args, "--namespace")
 		args = append(args, argocdConfig.Namespace)
+		fmt.Printf("Set namespace: %s\n", argocdConfig.Namespace)
 	}
 
 	if len(argocdConfig.ReleaseName) > 0 {
 		args = append(args, "--release-name")
 		args = append(args, argocdConfig.ReleaseName)
+		fmt.Printf("Set release name: %s\n", argocdConfig.ReleaseName)
 	}
 
 	if argocdConfig.SkipCRD {
 		args = append(args, "--skip-crds")
+		fmt.Println("Set to skip CRDs")
 	} else {
 		args = append(args, "--include-crds")
+		fmt.Println("Set to include CRDs")
 	}
 
 	if len(argocdConfig.SyncOptionReplace) > 0 {
 		postRendererScript := renderer.preparePostRenderer(argocdConfig.SyncOptionReplace)
 		args = append(args, "--post-renderer")
 		args = append(args, postRendererScript)
+		fmt.Printf("Set post-renderer script: %s\n", postRendererScript)
 	}
 
 	args = append(args, ".")
 	strCmd := strings.Join(args, " ")
-	renderer.debugLog(strCmd + "\n")
+	fmt.Printf("Helm command: %s\n", strCmd)
 
 	cmd := exec.Command(command, strings.Split(strCmd, " ")...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
+		fmt.Printf("Exec helm template error: %s\n%s\n", err, stderr.String())
 		log.Fatalf("Exec helm template error: %s\n%s", err, stderr.String())
 	}
 
+	fmt.Println("Helm template executed successfully")
 	fmt.Println(out.String())
 }
 

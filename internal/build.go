@@ -43,6 +43,8 @@ func NewBuilder() *Builder {
 }
 
 func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmRegistrySecretConfigPath string) {
+	log.Println("Starting Build process...")
+
 	if len(helmChartPath) <= 0 {
 		helmChartPath = defaultHelmChartPath
 	}
@@ -53,6 +55,7 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 		helmRegistrySecretConfigPath = defaultHelmRegistrySecretConfigPath
 	}
 
+	log.Printf("Changing directory to: %s\n", helmChartPath)
 	os.Chdir(helmChartPath)
 	useExternalHelmChartPathIfSet()
 	chartYaml := ReadChartYaml()
@@ -60,7 +63,7 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 	// Skip if chart doesn't have dependency
 	dependencies := chartYaml["dependencies"]
 	if dependencies == nil || len(dependencies.([]interface{})) <= 0 {
-		log.Println("Not dependency found.")
+		log.Println("No dependencies found.")
 		return
 	}
 
@@ -68,8 +71,13 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 	repositoryConfigName := repoConfigPath + chartYaml["name"].(string) + ".yaml"
 	log.Printf("repositoryConfigName: %s\n", repositoryConfigName)
 
+	log.Println("Generating repository config...")
 	builder.generateRepositoryConfig(repositoryConfigName, chartYaml, helmRegistrySecretConfigPath)
+
+	log.Println("Executing helm dependency build...")
 	builder.executeHelmDependencyBuild(repositoryConfigName)
+
+	log.Println("Build process completed.")
 }
 
 func (builder *Builder) generateRepositoryConfig(repositoryConfigName string, chartYaml map[string]interface{}, helmRegistrySecretConfigPath string) {
