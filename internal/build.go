@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v2"
@@ -54,49 +55,178 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 		helmRegistrySecretConfigPath = defaultHelmRegistrySecretConfigPath
 	}
 
-	// List file in our working directory
+	appRevision := os.Getenv("ARGOCD_APP_REVISION_SHORT")
+	if len(appRevision) <= 0 {
+		appRevision = "default-app-revision"
+	}
+
+	appName := os.Getenv("ARGOCD_APP_NAME")
+	if len(appName) <= 0 {
+		appName = "default-app-name"
+	}
+
 	files, err := os.ReadDir(helmChartPath)
 	if err != nil {
 		log.Fatalf("Error reading directory: %v", err)
 	}
+
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatalf("Error getting current directory: %v", err)
 	}
+
 	log.Printf("Files in directory %s:", dir)
 	for _, file := range files {
 		log.Println(file.Name())
 	}
-	log.Println("END")
 
-	log.Printf("Changing directory to: %s\n", helmChartPath)
+	// GetAbsoluteDir
+	absPath, err := filepath.Abs(helmChartPath)
+	if err != nil {
+		log.Fatalf("Error getting absolute path: %v", err)
+	}
+
+	log.Printf("Changing directory to: %s\n", absPath)
 	err = os.Chdir(helmChartPath)
 	if err != nil {
 		log.Fatalf("Error changing directory: %v", err)
 	}
 
-	useExternalHelmChartPathIfSet()
+	// Create a tempDir dedicated for the helm chart
+	// We will untar the helm chart in this directory
+	tempDir := fmt.Sprintf("%s/%s-%s", os.TempDir(), appName, appRevision)
 
-	chartYaml := ReadChartYaml()
-
-	// Skip if chart doesn't have dependency
-	dependencies := chartYaml["dependencies"]
-	if dependencies == nil || len(dependencies.([]interface{})) <= 0 {
-		log.Println("No dependencies found.")
-		return
+	// If exists, remove the tempDir
+	if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
+		err = os.RemoveAll(tempDir)
+		if err != nil {
+			log.Fatalf("Error removing temp directory: %v", err)
+		}
 	}
 
+	err = os.Mkdir(tempDir, 0700)
+	if err != nil {
+		log.Fatalf("Error creating temp directory: %v", err)
+	}
+
+	log.Printf("Created temp directory: %s\n", tempDir)
+
+	for _, file := range files {
+
+		// Skip if file is a directory or not a yaml file
+		if file.IsDir() || (!strings.HasSuffix(file.Name(), ".yaml") && !strings.HasSuffix(file.Name(), ".yml")) {
+			continue
+		}
+
+		fileContent, err := os.ReadFile(file.Name())
+		if err != nil {
+			log.Fatalf("Error reading file: %v", err)
+		}
+		application := Application{}
+		if err := yaml.Unmarshal(fileContent, &application); err != nil {
+			log.Printf("Error unmarshal yaml: %v. Skipping...", err)
+			continue
+		}
+
+		log.Println("Manifest name:", application.Metadata.Name)
+
+		helmRegistry := application.Spec.Source.RepoURL
+		if !strings.HasPrefix(helmRegistry, "https://") {
+			log.Println("Helm registry is not https, skipping...")
+			continue
+		}
+
+		sysCommand := "helm"
+		sysArgs := []string{"pull", application.Spec.Source.Chart, "--repo", application.Spec.Source.RepoURL, "--untar", "--untardir", tempDir}
+		sysCmd := exec.Command(sysCommand, sysArgs...)
+		var out, stderr bytes.Buffer
+		sysCmd.Stdout = &out
+		sysCmd.Stderr = &stderr
+		err = sysCmd.Run()
+		if err != nil {
+			log.Fatalf("Error running helm pull: %s\n%s", err, stderr.String())
+		}
+		err = cleanupTempDir(tempDir)
+		if err != nil {
+			log.Fatalf("Error cleaning up temp directory: %v", err)
+		}
+
+		chartPath := filepath.Join(tempDir, application.Spec.Source.Chart)
+		if _, err := os.Stat(chartPath); os.IsNotExist(err) {
+			log.Fatalf("Directory %s does not exist", chartPath)
+		}
+
+		chartYaml := ReadChartYaml(chartPath)
+
+		isDependency := false
+		dependencies := chartYaml["dependencies"]
+		if dependencies == nil || len(dependencies.([]interface{})) <= 0 {
+			log.Println("No dependencies found.")
+		} else {
+			isDependency = true
+			log.Println("Dependencies found.")
+		}
+
+		if isDependency {
+			log.Println("Generating repository config...")
+			os.Chdir(tempDir + "/" + application.Spec.Source.Chart)
+			sysArgs = []string{"dependency", "build", "--repository-config", repoConfigPath + application.Metadata.Name + ".yaml"}
+			sysCmd = exec.Command(sysCommand, sysArgs...)
+			sysCmd.Run()
+		}
+
+		overrideValuesPath := ""
+		// if Values override is set, create a file override.values.yaml
+		if application.Spec.Source.Helm.Values != "" {
+			log.Println("Values file found, will use it to override values.")
+
+			overrideValuesPath = fmt.Sprintf("%s/override.values.yaml", chartPath)
+			err = os.WriteFile(overrideValuesPath, applyEnvOnValues([]byte(application.Spec.Source.Helm.Values)), 0600)
+			if err != nil {
+				log.Fatalf("Error writing override values: %v", err)
+			}
+		}
+
+		sysArgs = []string{"template", application.Metadata.Name, chartPath}
+		if application.Spec.Destination.Namespace == "" {
+			sysArgs = append(sysArgs, "--namespace", os.Getenv("ARGOCD_APP_NAMESPACE"))
+		} else {
+			sysArgs = append(sysArgs, "--namespace", application.Spec.Destination.Namespace)
+		}
+
+		if overrideValuesPath != "" {
+			sysArgs = append(sysArgs, "--values", overrideValuesPath)
+		}
+
+		sysCmd = exec.Command(sysCommand, sysArgs...)
+		sysCmd.Stdout = &out
+		sysCmd.Stderr = &stderr
+		err = sysCmd.Run()
+		if err != nil {
+			log.Fatalf("Error running helm template: %s\n%s", err, stderr.String())
+		}
+		fmt.Println(out.String())
+
+		buildPath := fmt.Sprintf("%s/%s/build.yaml", tempDir, application.Metadata.Name)
+		err = os.WriteFile(buildPath, out.Bytes(), 0600)
+		if err != nil {
+			log.Fatalf("Error writing override values: %v", err)
+		}
+	}
+
+	//	log.Fatal("stop here")
+
 	// Use app name as config file name
-	repositoryConfigName := repoConfigPath + chartYaml["name"].(string) + ".yaml"
-	log.Printf("repositoryConfigName: %s\n", repositoryConfigName)
+	// repositoryConfigName := repoConfigPath + chartYaml["name"].(string) + ".yaml"
+	// log.Printf("repositoryConfigName: %s\n", repositoryConfigName)
 
-	log.Println("Generating repository config...")
-	builder.generateRepositoryConfig(repositoryConfigName, chartYaml, helmRegistrySecretConfigPath)
+	// log.Println("Generating repository config...")
+	// builder.generateRepositoryConfig(repositoryConfigName, chartYaml, helmRegistrySecretConfigPath)
 
-	log.Println("Executing helm dependency build...")
-	builder.executeHelmDependencyBuild(repositoryConfigName)
+	// log.Println("Executing helm dependency build...")
+	// builder.executeHelmDependencyBuild(repositoryConfigName)
 
-	log.Println("Build process completed.")
+	// log.Println("Build process completed.")
 }
 
 func (builder *Builder) generateRepositoryConfig(repositoryConfigName string, chartYaml map[string]interface{}, helmRegistrySecretConfigPath string) {
@@ -185,4 +315,46 @@ func (builder *Builder) executeHelmDependencyBuild(repositoryConfigName string) 
 		log.Fatalf("Exec helm dependency build error: %s\n%s", err, stderr.String())
 	}
 	log.Println(out.String())
+}
+
+// When doing the helm pull, helm will create a directory with the chart name (e.g. cloudflare-tunnel)
+// and another with the archive name (e.g. cloudflare-tunnel-0.3.2.tgz).
+// To avoid to have this unnecessary directory, we will remove all the .tgz files in the tempDir
+func cleanupTempDir(tempDir string) error {
+	// in tempDir, remove all files that end with .tgz
+	err := filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() && strings.HasSuffix(info.Name(), ".tgz") {
+			if err := os.Remove(path); err != nil {
+				log.Printf("Error removing file %s: %v", path, err)
+			} else {
+				log.Printf("Removed file %s", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func applyEnvOnValues(values []byte) []byte {
+	for _, env := range os.Environ() {
+		// For security reason, we will skip all the env that start with ARGOCD_ and KUBERNETES_
+		// These env are set by ArgoCD and Kubernetes and we don't want to expose them in any manifest
+		if strings.HasPrefix(env, "ARGOCD_") || strings.HasPrefix(env, "KUBERNETES_") {
+			log.Printf("Skippinp env: %s", env)
+			continue
+		}
+
+		pair := strings.SplitN(env, "=", 2)
+		values = bytes.ReplaceAll(values, []byte(fmt.Sprintf("${%s}", pair[0])), []byte(pair[1]))
+	}
+
+	return values
 }

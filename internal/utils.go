@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -19,9 +20,10 @@ type HexArgocdPluginConfig struct {
 	ExternalHelmChartPath string   `yaml:"externalHelmChartPath,omitempty"` // relative path of the helm chart to use
 }
 
-func ReadChartYaml() map[string]interface{} {
+func ReadChartYaml(path string) map[string]interface{} {
 	var chartYaml map[string]interface{}
-	bs, err := os.ReadFile("Chart.yaml")
+
+	bs, err := os.ReadFile(fmt.Sprintf("%s/Chart.yaml", path))
 	if err != nil {
 		log.Fatalf("Read Chart.yaml error: %v", err)
 	}

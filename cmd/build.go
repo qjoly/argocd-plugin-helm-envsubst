@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"github.com/emicklei/go-restful/v3/log"
 	app "github.com/qjoly/argocd-plugin-helm-envsubst/internal"
 	"github.com/spf13/cobra"
 )
@@ -23,9 +22,6 @@ var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Similar to helm dependency build",
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Printf("Path: %s", buildPath)
-		log.Printf("Repository config path: %s", repositoryConfigPath)
-		log.Printf("Helm registry secret config path: %s", helmRegistrySecretConfigPath)
 		app.NewBuilder().Build(buildPath, repositoryConfigPath, helmRegistrySecretConfigPath)
 	},
 }

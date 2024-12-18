@@ -1,25 +1,35 @@
 package internal
 
 import (
-	"bytes"
+	"context"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
-	"time"
-
-	"regexp"
 
 	"gopkg.in/yaml.v2"
+	"k8s.io/apimachinery/pkg/api/meta"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	memory "k8s.io/client-go/discovery/cached"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
+	"k8s.io/cri-api/pkg/errors"
+)
+
+const (
+	tokenPath     = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	caPath        = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	namespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 )
 
 var (
 	defaultDebugLogFilePath = "/tmp/argocd-helm-envsubst-plugin/"
-	defaultHelmChartPath    = "./"
+	defaultHelmChartPath    = "./test/"
 	argocdEnvVarPrefix      = "ARGOCD_ENV"
 )
 
@@ -37,142 +47,121 @@ func NewRenderer() *Renderer {
 }
 
 func (renderer *Renderer) RenderTemplate(helmChartPath string, debugLogFilePath string) {
-	fmt.Println("Starting RenderTemplate")
+	// fmt.Println("Starting RenderTemplate")
 
 	if len(debugLogFilePath) <= 0 {
 		renderer.debugLogFilePath = defaultDebugLogFilePath
 	} else {
 		renderer.debugLogFilePath = debugLogFilePath
 	}
-	fmt.Printf("Debug log file path set to: %s\n", renderer.debugLogFilePath)
 
-	if len(helmChartPath) <= 0 {
-		helmChartPath = defaultHelmChartPath
+	appRevision := os.Getenv("ARGOCD_APP_REVISION_SHORT")
+	if len(appRevision) <= 0 {
+		appRevision = "default-app-revision"
 	}
-	fmt.Printf("Helm chart path set to: %s\n", helmChartPath)
 
-	err := os.Chdir(helmChartPath)
+	appName := os.Getenv("ARGOCD_APP_NAME")
+	if len(appName) <= 0 {
+		appName = "default-app-name"
+	}
+
+	tempDir := fmt.Sprintf("%s/%s-%s", os.TempDir(), appName, appRevision)
+
+	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+		log.Fatal("Temp dir not found, please check if the plugin is running in the correct order")
+	}
+
+	files, err := filepath.Glob(tempDir + "/*/build.yaml")
+
 	if err != nil {
-		fmt.Printf("Error changing directory: %v\n", err)
-		log.Fatalf("Error changing directory: %v", err)
+		log.Fatalf("Glob error: %v", err)
 	}
-	fmt.Printf("Changed directory to: %s\n", helmChartPath)
 
-	envs := renderer.getArgocdEnvList()
-	fmt.Printf("ArgoCD environment variables: %v\n", envs)
-
-	command := "helm"
-	args := []string{"template"}
-
-	useExternalHelmChartPathIfSet()
-
-	configFileNames := renderer.FindHelmConfigs()
-	fmt.Printf("Found Helm config files: %v\n", configFileNames)
-
-	if len(configFileNames) > 0 {
-		for _, name := range configFileNames {
-			args = append(args, "-f")
-			args = append(args, name)
-			renderer.inlineEnvsubst(name, envs)
-			fmt.Printf("Processed config file: %s\n", name)
+	for _, file := range files {
+		bs, err := os.ReadFile(file)
+		if err != nil {
+			log.Fatalf("Read file error: %v", err)
 		}
+
+		fmt.Println(string(bs))
 	}
 
-	helmConfig := renderer.mergeYaml(configFileNames)
-	fmt.Printf("Merged Helm config: %s\n", helmConfig)
+	// useExternalHelmChartPathIfSet()
 
-	argocdConfig := ReadArgocdConfig(helmConfig)
-	fmt.Printf("ArgoCD config: %v\n", argocdConfig)
+	// configFileNames := renderer.FindHelmConfigs()
+	// fmt.Printf("Found Helm config files: %v\n", configFileNames)
 
-	if len(argocdConfig.Namespace) > 0 {
-		args = append(args, "--namespace")
-		args = append(args, argocdConfig.Namespace)
-		fmt.Printf("Set namespace: %s\n", argocdConfig.Namespace)
-	}
+	// if len(configFileNames) > 0 {
+	// 	for _, name := range configFileNames {
+	// 		args = append(args, "-f")
+	// 		args = append(args, name)
+	// 		renderer.inlineEnvsubst(name, envs)
+	// 		fmt.Printf("Processed config file: %s\n", name)
+	// 	}
+	// }
 
-	if len(argocdConfig.ReleaseName) > 0 {
-		args = append(args, "--release-name")
-		args = append(args, argocdConfig.ReleaseName)
-		fmt.Printf("Set release name: %s\n", argocdConfig.ReleaseName)
-	}
+	// helmConfig := renderer.mergeYaml(configFileNames)
+	// fmt.Printf("Merged Helm config: %s\n", helmConfig)
 
-	if argocdConfig.SkipCRD {
-		args = append(args, "--skip-crds")
-		fmt.Println("Set to skip CRDs")
-	} else {
-		args = append(args, "--include-crds")
-		fmt.Println("Set to include CRDs")
-	}
+	// argocdConfig := ReadArgocdConfig(helmConfig)
+	// fmt.Printf("ArgoCD config: %v\n", argocdConfig)
 
-	if len(argocdConfig.SyncOptionReplace) > 0 {
-		postRendererScript := renderer.preparePostRenderer(argocdConfig.SyncOptionReplace)
-		args = append(args, "--post-renderer")
-		args = append(args, postRendererScript)
-		fmt.Printf("Set post-renderer script: %s\n", postRendererScript)
-	}
+	// if len(argocdConfig.Namespace) > 0 {
+	// 	args = append(args, "--namespace")
+	// 	args = append(args, argocdConfig.Namespace)
+	// 	fmt.Printf("Set namespace: %s\n", argocdConfig.Namespace)
+	// }
 
-	args = append(args, ".")
-	strCmd := strings.Join(args, " ")
-	fmt.Printf("Helm command: %s\n", strCmd)
+	// if len(argocdConfig.ReleaseName) > 0 {
+	// 	args = append(args, "--release-name")
+	// 	args = append(args, argocdConfig.ReleaseName)
+	// 	fmt.Printf("Set release name: %s\n", argocdConfig.ReleaseName)
+	// }
 
-	cmd := exec.Command(command, strings.Split(strCmd, " ")...)
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if err != nil {
-		fmt.Printf("Exec helm template error: %s\n%s\n", err, stderr.String())
-		log.Fatalf("Exec helm template error: %s\n%s", err, stderr.String())
-	}
+	// if argocdConfig.SkipCRD {
+	// 	args = append(args, "--skip-crds")
+	// 	fmt.Println("Set to skip CRDs")
+	// } else {
+	// 	args = append(args, "--include-crds")
+	// 	fmt.Println("Set to include CRDs")
+	// }
 
-	fmt.Println("Helm template executed successfully")
-	fmt.Println(out.String())
+	// if len(argocdConfig.SyncOptionReplace) > 0 {
+	// 	postRendererScript := renderer.preparePostRenderer(argocdConfig.SyncOptionReplace)
+	// 	args = append(args, "--post-renderer")
+	// 	args = append(args, postRendererScript)
+	// 	fmt.Printf("Set post-renderer script: %s\n", postRendererScript)
+	// }
+
+	// args = append(args, ".")
+	// strCmd := strings.Join(args, " ")
+	// fmt.Printf("Helm command: %s\n", strCmd)
+
+	// cmd := exec.Command(command, strings.Split(strCmd, " ")...)
+	// var out, stderr bytes.Buffer
+	// cmd.Stdout = &out
+	// cmd.Stderr = &stderr
+	// err = cmd.Run()
+	// if err != nil {
+	// 	fmt.Printf("Exec helm template error: %s\n%s\n", err, stderr.String())
+	// 	log.Fatalf("Exec helm template error: %s\n%s", err, stderr.String())
+	// }
+
+	// fmt.Println("Helm template executed successfully")
+	// fmt.Println(out.String())
 }
 
-func (renderer *Renderer) FindHelmConfigs() []string {
-	// Default to values.yaml
-	files := []ConfigFileSeq{
-		{
-			Seq:  0,
-			Name: "values.yaml",
-		},
-	}
-	root := "config/"
-	environment := os.Getenv("ARGOCD_ENV_ENVIRONMENT")
-	cluster := os.Getenv("ARGOCD_ENV_CLUSTER")
-	helmConfigFilePatterns := []string{
-		"values.yaml",
-		root + environment + ".yaml",
-		root + cluster + "_" + environment + ".yaml",
-	}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			// log.Fatalf("Config folder not found: %v", err)
-			return nil
-		}
-		for seq, pattern := range helmConfigFilePatterns {
-			if match, _ := regexp.MatchString(pattern, path); match {
-				files = append(files, ConfigFileSeq{Seq: seq, Name: path})
-			}
-		}
-		return nil
-	})
+func getMapping(gvk schema.GroupVersionKind) (*meta.RESTMapping, error) {
+	config, err := rest.InClusterConfig()
 	if err != nil {
-		log.Fatalf("Find config file in dir error: %v", err)
+		return nil, err
 	}
-
-	// sort
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Seq < files[j].Seq
-	})
-
-	// convert array of struct to array of string
-	sortedFiles := []string{}
-	for _, file := range files {
-		sortedFiles = append(sortedFiles, file.Name)
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return nil, err
 	}
-
-	return sortedFiles
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(discoveryClient))
+	return mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 }
 
 func (renderer *Renderer) getArgocdEnvList() []string {
@@ -184,24 +173,6 @@ func (renderer *Renderer) getArgocdEnvList() []string {
 		}
 	}
 	return envs
-}
-
-func (renderer *Renderer) inlineEnvsubst(filename string, envs []string) {
-	// Read file
-	bs, err := ioutil.ReadFile(filename)
-	if err != nil {
-		renderer.debugLog(fmt.Sprintf("inlineEnvsubst - Read file error %v \n", err))
-		return
-	}
-	helmConfig := string(bs)
-
-	// Substitute
-	envsubstHelmConfig := renderer.envsubst(helmConfig, envs)
-
-	// Write file
-	if err := ioutil.WriteFile(filename, []byte(envsubstHelmConfig), 0644); err != nil {
-		renderer.debugLog(fmt.Sprintf("inlineEnvsubst - Write file error %v \n", err))
-	}
 }
 
 func (renderer *Renderer) envsubst(str string, envs []string) string {
@@ -267,13 +238,11 @@ func (renderer *Renderer) mergeYaml(configFiles []string) string {
 	for _, filename := range configFiles {
 
 		var override map[string]interface{}
-		bs, err := ioutil.ReadFile(filename)
+		bs, err := os.ReadFile(filename)
 		if err != nil {
-			// log.Println(err)
 			continue
 		}
 		if err := yaml.Unmarshal(bs, &override); err != nil {
-			// log.Println(err)
 			continue
 		}
 
@@ -295,37 +264,59 @@ func (renderer *Renderer) mergeYaml(configFiles []string) string {
 	return string(bs)
 }
 
-func (renderer *Renderer) debugLog(cmd string) {
-	date := time.Now()
-	formattedDate := date.Format("01-02-2006")
-	logFilePath := renderer.debugLogFilePath + formattedDate + ".log"
+func applyKubernetesManifest(manifestPath string) error {
+	namespacePath := "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
-	// Log line name - Get from Chart.yaml name field
-	chartYaml := ReadChartYaml()
-
-	// Create log line
-	formattedDateTime := date.Format("2006-01-02 15:04:05.000000")
-	logLine := fmt.Sprintf("[%s][%s] %s", formattedDateTime, chartYaml["name"], cmd)
-
-	// Create log file if not exist
-	if _, err := ioutil.ReadFile(logFilePath); err != nil {
-		// Ignore if not able to create folder
-		_ = os.Mkdir(renderer.debugLogFilePath, 0755)
-
-		f, err := os.Create(logFilePath)
-		if err != nil {
-			log.Fatalf("Fail to create log file: %v", err)
-		}
-		f.Close()
-	}
-
-	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	namespace, err := os.ReadFile(namespacePath)
 	if err != nil {
-		log.Fatalf("Fail to opn debug log file: %v", err)
+		return fmt.Errorf("error reading namespace file: %v", err)
 	}
 
-	// Write log line
-	if _, err = f.WriteString(logLine); err != nil {
-		log.Fatalf("Fail to write debug log file: %v", err)
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("error getting in-cluster config: %v", err)
 	}
+
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("error creating dynamic client: %v", err)
+	}
+
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("error reading manifest file: %v", err)
+	}
+
+	manifest := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal(data, manifest); err != nil {
+		return fmt.Errorf("error parsing manifest: %v", err)
+	}
+
+	gvk := manifest.GroupVersionKind()
+	mapping, err := getMapping(gvk)
+	if err != nil {
+		return fmt.Errorf("error getting mapping for GVK %v: %v", gvk, err)
+	}
+
+	resource := dynamicClient.Resource(mapping.Resource).Namespace(string(namespace))
+	name := manifest.GetName()
+
+	_, err = resource.Get(context.TODO(), name, v1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, err = resource.Create(context.TODO(), manifest, v1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("error creating resource: %v", err)
+		}
+		fmt.Println("Resource created successfully.")
+	} else if err == nil {
+		_, err = resource.Update(context.TODO(), manifest, v1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("error updating resource: %v", err)
+		}
+		fmt.Println("Resource updated successfully.")
+	} else {
+		return fmt.Errorf("error checking resource: %v", err)
+	}
+
+	return nil
 }

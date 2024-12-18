@@ -3,10 +3,7 @@ package internal_test
 import (
 	"fmt"
 	"os"
-	"reflect"
 	"testing"
-
-	"github.com/qjoly/argocd-plugin-helm-envsubst/internal"
 )
 
 const (
@@ -32,23 +29,5 @@ func setup(t *testing.T) {
 func teardown(t *testing.T) {
 	if err := os.RemoveAll("config"); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestFindHelmConfigs(t *testing.T) {
-	setup(t)
-	defer teardown(t)
-
-	r := internal.NewRenderer()
-
-	expect := []string{
-		"values.yaml",
-		fmt.Sprintf("config/%s.yaml", TEST_ARGOCD_ENV_ENVIRONMENT),
-		fmt.Sprintf("config/%s_%s.yaml", TEST_ARGOCD_ENV_CLUSTER, TEST_ARGOCD_ENV_ENVIRONMENT),
-	}
-	actual := r.FindHelmConfigs()
-
-	if !reflect.DeepEqual(actual, expect) {
-		t.Errorf("Expected %s do not match actual %s", expect, actual)
 	}
 }
