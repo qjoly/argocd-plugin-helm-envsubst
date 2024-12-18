@@ -54,14 +54,19 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 		helmRegistrySecretConfigPath = defaultHelmRegistrySecretConfigPath
 	}
 
-	// Show all env variables
-	for _, e := range os.Environ() {
-		pair := strings.SplitN(e, "=", 2)
-		log.Printf("%s=%s\n", pair[0], pair[1])
+	// List file in our working directory
+	files, err := os.ReadDir(helmChartPath)
+	if err != nil {
+		log.Fatalf("Error reading directory: %v", err)
 	}
+	log.Println("Files in directory:")
+	for _, file := range files {
+		log.Println(file.Name())
+	}
+	log.Println("END")
 
 	log.Printf("Changing directory to: %s\n", helmChartPath)
-	err := os.Chdir(helmChartPath)
+	err = os.Chdir(helmChartPath)
 	if err != nil {
 		log.Fatalf("Error changing directory: %v", err)
 	}
