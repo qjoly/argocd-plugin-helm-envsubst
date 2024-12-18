@@ -342,19 +342,3 @@ func cleanupTempDir(tempDir string) error {
 
 	return nil
 }
-
-func applyEnvOnValues(values []byte) []byte {
-	for _, env := range os.Environ() {
-		// For security reason, we will skip all the env that start with ARGOCD_ and KUBERNETES_
-		// These env are set by ArgoCD and Kubernetes and we don't want to expose them in any manifest
-		if strings.HasPrefix(env, "ARGOCD_") || strings.HasPrefix(env, "KUBERNETES_") {
-			log.Printf("Skippinp env: %s", env)
-			continue
-		}
-
-		pair := strings.SplitN(env, "=", 2)
-		values = bytes.ReplaceAll(values, []byte(fmt.Sprintf("${%s}", pair[0])), []byte(pair[1]))
-	}
-
-	return values
-}

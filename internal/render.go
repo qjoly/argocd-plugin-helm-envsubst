@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -9,16 +8,6 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v2"
-	"k8s.io/apimachinery/pkg/api/meta"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/discovery"
-	memory "k8s.io/client-go/discovery/cached"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
-	"k8s.io/cri-api/pkg/errors"
 )
 
 const (
@@ -47,7 +36,7 @@ func NewRenderer() *Renderer {
 }
 
 func (renderer *Renderer) RenderTemplate(helmChartPath string, debugLogFilePath string) {
-	// fmt.Println("Starting RenderTemplate")
+	log.Println("Starting RenderTemplate")
 
 	if len(debugLogFilePath) <= 0 {
 		renderer.debugLogFilePath = defaultDebugLogFilePath
@@ -151,30 +140,6 @@ func (renderer *Renderer) RenderTemplate(helmChartPath string, debugLogFilePath 
 	// fmt.Println(out.String())
 }
 
-func getMapping(gvk schema.GroupVersionKind) (*meta.RESTMapping, error) {
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, err
-	}
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(discoveryClient))
-	return mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-}
-
-func (renderer *Renderer) getArgocdEnvList() []string {
-	envs := []string{}
-	for _, env := range os.Environ() {
-		key := strings.Split(env, "=")[0]
-		if strings.HasPrefix(key, argocdEnvVarPrefix) {
-			envs = append(envs, key)
-		}
-	}
-	return envs
-}
-
 func (renderer *Renderer) envsubst(str string, envs []string) string {
 	for _, env := range envs {
 		envVar := os.Getenv(env)
@@ -262,61 +227,4 @@ func (renderer *Renderer) mergeYaml(configFiles []string) string {
 	}
 
 	return string(bs)
-}
-
-func applyKubernetesManifest(manifestPath string) error {
-	namespacePath := "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-
-	namespace, err := os.ReadFile(namespacePath)
-	if err != nil {
-		return fmt.Errorf("error reading namespace file: %v", err)
-	}
-
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return fmt.Errorf("error getting in-cluster config: %v", err)
-	}
-
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("error creating dynamic client: %v", err)
-	}
-
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		return fmt.Errorf("error reading manifest file: %v", err)
-	}
-
-	manifest := &unstructured.Unstructured{}
-	if err := yaml.Unmarshal(data, manifest); err != nil {
-		return fmt.Errorf("error parsing manifest: %v", err)
-	}
-
-	gvk := manifest.GroupVersionKind()
-	mapping, err := getMapping(gvk)
-	if err != nil {
-		return fmt.Errorf("error getting mapping for GVK %v: %v", gvk, err)
-	}
-
-	resource := dynamicClient.Resource(mapping.Resource).Namespace(string(namespace))
-	name := manifest.GetName()
-
-	_, err = resource.Get(context.TODO(), name, v1.GetOptions{})
-	if errors.IsNotFound(err) {
-		_, err = resource.Create(context.TODO(), manifest, v1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("error creating resource: %v", err)
-		}
-		fmt.Println("Resource created successfully.")
-	} else if err == nil {
-		_, err = resource.Update(context.TODO(), manifest, v1.UpdateOptions{})
-		if err != nil {
-			return fmt.Errorf("error updating resource: %v", err)
-		}
-		fmt.Println("Resource updated successfully.")
-	} else {
-		return fmt.Errorf("error checking resource: %v", err)
-	}
-
-	return nil
 }
