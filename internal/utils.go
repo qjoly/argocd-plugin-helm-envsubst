@@ -32,7 +32,9 @@ func ReadChartYaml() map[string]interface{} {
 }
 
 func useExternalHelmChartPathIfSet() {
-	bs, err := os.ReadFile("values.yaml")
+
+	log.Printf("Reading file: %s\n", os.Getenv("ARGOCD_APP_SOURCE_PATH"))
+	bs, err := os.ReadFile(os.Getenv("ARGOCD_APP_SOURCE_PATH"))
 	if err != nil {
 		log.Fatalf("useExternalHelmChart - read values.yaml error : %v", err)
 	}
