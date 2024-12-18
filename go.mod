@@ -3,6 +3,7 @@ module github.com/qjoly/argocd-plugin-helm-envsubst
 go 1.18
 
 require (
+	github.com/emicklei/go-restful/v3 v3.12.1
 	github.com/spf13/cobra v1.5.0
 	gopkg.in/yaml.v2 v2.4.0
 )
