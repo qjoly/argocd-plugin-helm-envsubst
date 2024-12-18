@@ -61,8 +61,13 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 	}
 
 	log.Printf("Changing directory to: %s\n", helmChartPath)
-	os.Chdir(helmChartPath)
+	err := os.Chdir(helmChartPath)
+	if err != nil {
+		log.Fatalf("Error changing directory: %v", err)
+	}
+
 	useExternalHelmChartPathIfSet()
+
 	chartYaml := ReadChartYaml()
 
 	// Skip if chart doesn't have dependency
