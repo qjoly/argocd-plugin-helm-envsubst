@@ -18,7 +18,8 @@ func NewGenerator() *Generator {
 func (generator *Generator) Generate() {
 	// Take stdin, substitute env vars and output the result
 
-	// Check if stdin is empty
+	log.Printf("Generating application: %s", os.Getenv("ARGOCD_APP_NAME"))
+
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) != 0 {
 		log.Fatal("stdin is empty")
@@ -37,7 +38,7 @@ func applyEnvOnValues(values []byte) []byte {
 		// For security reason, we will skip all the env that start with ARGOCD_ and KUBERNETES_
 		// These env are set by ArgoCD and Kubernetes and we don't want to expose them in any manifest
 		if strings.HasPrefix(env, "ARGOCD_") || strings.HasPrefix(env, "KUBERNETES_") {
-			log.Printf("Skippinp env: %s", env)
+			log.Printf("Skipping env: %s", env)
 			continue
 		}
 
