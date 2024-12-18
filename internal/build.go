@@ -3,7 +3,6 @@ package internal
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -53,6 +52,12 @@ func (builder *Builder) Build(helmChartPath string, repoConfigPath string, helmR
 	}
 	if len(helmRegistrySecretConfigPath) <= 0 {
 		helmRegistrySecretConfigPath = defaultHelmRegistrySecretConfigPath
+	}
+
+	// Show all env variables
+	for _, e := range os.Environ() {
+		pair := strings.SplitN(e, "=", 2)
+		log.Printf("%s=%s\n", pair[0], pair[1])
 	}
 
 	log.Printf("Changing directory to: %s\n", helmChartPath)
@@ -136,7 +141,7 @@ func (builder *Builder) readRepositoryConfig(repositoryUrl string, helmRegistryS
 	repo := HelmRepositoryConfig{}
 
 	// Read helm repository config created by Terraform
-	bs, err := ioutil.ReadFile(helmRegistrySecretConfigPath)
+	bs, err := os.ReadFile(helmRegistrySecretConfigPath)
 	if err != nil {
 		log.Fatalf("Error reading repositories.yaml: %v", err)
 	}
